@@ -17,6 +17,7 @@ import Profile from './components/Profile';
 import Store from './components/Store';
 import Payment from './components/Payment';
 
+// Ensure 'npm install bootstrap' was run so Vite can find this file
 import 'bootstrap/dist/css/bootstrap.min.css';
 
 function App() {
@@ -29,17 +30,13 @@ function App() {
       setIsUserLoggedIn(!!localStorage.getItem("userDetails"));
       setIsAdminLoggedIn(localStorage.getItem("role") === "admin");
     };
+    // Listens for login/logout actions across different browser tabs
     window.addEventListener('storage', checkAuth);
     return () => window.removeEventListener('storage', checkAuth);
   }, []);
 
-  const handleUserLogin = () => {
-    setIsUserLoggedIn(true);
-  };
-
-  const handleAdminLogin = () => {
-    setIsAdminLoggedIn(true);
-  };
+  const handleUserLogin = () => setIsUserLoggedIn(true);
+  const handleAdminLogin = () => setIsAdminLoggedIn(true);
 
   return (
     <Router>
@@ -54,8 +51,6 @@ function App() {
         <Route path="/payment" element={isUserLoggedIn ? <Payment /> : <Navigate to="/login" replace />} />
 
         {/* ================= ADMIN FLOW ================= */}
-        
-        {/* Admin Login Route */}
         <Route
           path="/admin-auth"
           element={isAdminLoggedIn ? <Navigate to="/admin-dashboard" replace /> : <AdminLogin onLogin={handleAdminLogin} />}
@@ -76,13 +71,11 @@ function App() {
                     <Route path="stock-reports" element={<StockReports />} />
                     <Route path="products" element={<ProductManagement />} />
                     <Route path="orders" element={<Orders />} />
-                    {/* Fallback for admin sub-routes */}
                     <Route path="*" element={<Navigate to="/admin-dashboard" replace />} />
                   </Routes>
                 </div>
               </div>
             ) : (
-              /* If NOT admin, redirect everything that isn't a user route to user login */
               <Navigate to="/login" replace />
             )
           }
