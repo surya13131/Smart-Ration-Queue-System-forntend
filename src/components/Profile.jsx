@@ -148,7 +148,7 @@ const ProfilePage = () => {
                         <div className="col-md-6">
                             <div className="info-item">
                                 <div className="icon-box"><ShieldCheck size={22}/></div>
-                                <div><div className="info-label">Aadhaar Status</div><div className="info-value">{userData.aadhaar || "Biometric Verified"}</div></div>
+                                <div><div className="info-label">Aadhaar Card Number</div><div className="info-value">{userData.aadhaar || "Biometric Verified"}</div></div>
                             </div>
                         </div>
                         <div className="col-md-12">

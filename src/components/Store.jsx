@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { 
-  User, ShoppingBag, Store, Calendar, 
-  CreditCard, Settings, LogOut, Search, ChevronRight, Plus, Minus, CheckCircle2 
+    User, ShoppingBag, Store, Calendar, 
+    CreditCard, Settings, LogOut, Search, ChevronRight, Plus, Minus, CheckCircle2 
 } from 'lucide-react';
 
 const ProductsPage = () => {
@@ -14,7 +14,7 @@ const ProductsPage = () => {
     const [products, setProducts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
-    // NEW: State to track what has been bought already
+    // State to track what has been bought already this month
     const [usedQuota, setUsedQuota] = useState({});
 
     const BACKEND_URL = "http://localhost:5000";
@@ -41,17 +41,40 @@ const ProductsPage = () => {
                 const prodRes = await axios.get(`${BACKEND_URL}/api/products`);
                 setProducts(prodRes.data);
 
-                // 2. Fetch User Orders to calculate used quota
-                const orderRes = await axios.get(`${BACKEND_URL}/api/orders/my?userId=${currentUser._id}`);
+                // --- CRITICAL FIX 1: Safely get the user ID ---
+                const actualUserId = currentUser?._id || currentUser?.id;
+                
+                if (!actualUserId) {
+                    console.error("User ID is missing!");
+                    setLoading(false);
+                    return; // Stop the code here so it doesn't crash the server
+                }
+
+                // 2. Fetch User Orders (ADDED CACHE BUSTER `&t=${Date.now()}` to force fresh data)
+                const orderRes = await axios.get(`${BACKEND_URL}/api/orders/my?userId=${actualUserId}&t=${Date.now()}`);
                 
                 const usageMap = {};
-                if (orderRes.data.data) {
-                    orderRes.data.data.forEach(order => {
-                        order.items.forEach(item => {
-                            // Link quantity to product ID
-                            const prodId = item.product._id || item.product;
-                            usageMap[prodId] = (usageMap[prodId] || 0) + item.quantity;
-                        });
+                
+                // Handle different backend response structures safely
+                const ordersList = orderRes.data.data || orderRes.data;
+
+                if (ordersList && Array.isArray(ordersList)) {
+                    // Get current month and year to ensure quota resets every month
+                    const now = new Date();
+                    const currentMonth = now.getMonth();
+                    const currentYear = now.getFullYear();
+
+                    ordersList.forEach(order => {
+                        const orderDate = new Date(order.createdAt);
+                        // Only count orders placed in the current month
+                        if (orderDate.getMonth() === currentMonth && orderDate.getFullYear() === currentYear) {
+                            order.items.forEach(item => {
+                                // CRITICAL FIX 2: Force the ID to be a String so matching works perfectly
+                                const prodId = String(item.product._id || item.product);
+                                // CRITICAL FIX 3: Ensure quantity is treated as a Number
+                                usageMap[prodId] = (usageMap[prodId] || 0) + Number(item.quantity || 0);
+                            });
+                        }
                     });
                 }
                 setUsedQuota(usageMap);
@@ -64,10 +87,11 @@ const ProductsPage = () => {
         fetchData();
     }, [navigate]);
 
-    // --- Logic for Monthly Limit Constraint (Updated for Quota) ---
+    // --- Logic for Monthly Limit Constraint ---
     const handleQty = (product, delta) => {
         const currentQty = quantities[product._id] || 0;
-        const alreadyBought = usedQuota[product._id] || 0;
+        // Use String() to safely look up the ID in our map
+        const alreadyBought = usedQuota[String(product._id)] || 0;
         const remainingQuota = product.monthlyLimit - alreadyBought;
         
         const newQty = currentQty + delta;
@@ -77,8 +101,29 @@ const ProductsPage = () => {
 
         // 2. Check against Remaining Quota (Limit - Already Bought)
         if (newQty > remainingQuota) {
-          alert(`Limit Exceeded! You already bought ${alreadyBought}${product.unit}. Remaining quota: ${remainingQuota}${product.unit}.`);
-          return;
+            alert(`Limit Exceeded! You already bought ${alreadyBought}${product.unit}. Remaining quota: ${remainingQuota}${product.unit}.`);
+            return;
+        }
+
+        setQuantities(prev => ({
+            ...prev,
+            [product._id]: newQty
+        }));
+    };
+
+    // --- NEW: Handle Direct Input Typing ---
+    const handleInputChange = (product, value) => {
+        const alreadyBought = usedQuota[String(product._id)] || 0;
+        const remainingQuota = product.monthlyLimit - alreadyBought;
+        
+        let newQty = parseInt(value, 10);
+        if (isNaN(newQty)) newQty = 0;
+        if (newQty < 0) newQty = 0;
+
+        // Auto-correct to maximum available if they type a number too high
+        if (newQty > remainingQuota) {
+            alert(`Limit Exceeded! You can only add up to ${remainingQuota}${product.unit} more.`);
+            newQty = remainingQuota; 
         }
 
         setQuantities(prev => ({
@@ -113,9 +158,7 @@ const ProductsPage = () => {
     const menuItems = [
         { name: 'Profile', icon: <User size={20}/>, path: '/profile' },
         { name: 'Products', icon: <ShoppingBag size={20}/>, path: '/store' },
- 
         { name: 'Payment', icon: <CreditCard size={20}/>, path: '/payment' },
-        
     ];
 
     if (!userData) return null;
@@ -158,12 +201,21 @@ const ProductsPage = () => {
                     width: 28px; height: 28px; border-radius: 50%; border: none;
                     background: #2563eb; color: white; display: flex; align-items: center; justify-content: center;
                 }
+                .btn-qty:disabled { background: #cbd5e1; cursor: not-allowed; }
                 .btn-proceed {
                     background: #0a1128; color: white; border: none; padding: 16px 35px;
                     border-radius: 15px; font-weight: 700; transition: 0.3s;
                 }
                 .btn-proceed:hover { background: #2563eb; transform: translateY(-2px); }
                 .quota-info { font-size: 0.75rem; font-weight: 600; }
+                
+                /* Hide standard HTML number input arrows */
+                input[type="number"]::-webkit-outer-spin-button,
+                input[type="number"]::-webkit-inner-spin-button {
+                    -webkit-appearance: none;
+                    margin: 0;
+                }
+                input[type="number"] { -moz-appearance: textfield; }
             `}</style>
 
             {/* Sidebar */}
@@ -201,7 +253,8 @@ const ProductsPage = () => {
                     <div className="row g-4">
                         {filteredProducts.map((product) => {
                             const isSelected = quantities[product._id] > 0;
-                            const alreadyBought = usedQuota[product._id] || 0;
+                            // Match string ID here just to be perfectly safe
+                            const alreadyBought = usedQuota[String(product._id)] || 0;
                             const remaining = product.monthlyLimit - alreadyBought;
 
                             return (
@@ -224,12 +277,29 @@ const ProductsPage = () => {
                                             </div>
                                             
                                             <div className="qty-controls mt-3">
-                                                <button className="btn-qty" onClick={() => handleQty(product, -1)}><Minus size={14} /></button>
-                                                <span className="fw-bold">{quantities[product._id] || 0}</span>
+                                                <button 
+                                                    className="btn-qty" 
+                                                    onClick={() => handleQty(product, -1)}
+                                                    disabled={(quantities[product._id] || 0) <= 0}
+                                                >
+                                                    <Minus size={14} />
+                                                </button>
+                                                
+                                                <input 
+                                                    type="number"
+                                                    className="text-center fw-bold border-0"
+                                                    style={{ width: '40px', background: 'transparent', outline: 'none' }}
+                                                    value={quantities[product._id] || ''}
+                                                    onChange={(e) => handleInputChange(product, e.target.value)}
+                                                    min="0"
+                                                    max={remaining}
+                                                    placeholder="0"
+                                                />
+                                                
                                                 <button 
                                                     className="btn-qty" 
                                                     onClick={() => handleQty(product, 1)} 
-                                                    disabled={remaining <= 0}
+                                                    disabled={(quantities[product._id] || 0) >= remaining || remaining <= 0}
                                                 >
                                                     <Plus size={14} />
                                                 </button>
