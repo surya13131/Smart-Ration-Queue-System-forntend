@@ -3,28 +3,35 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { 
     User, ShoppingBag, Store, Calendar, 
-    CreditCard, Settings, LogOut, Search, ChevronRight, Plus, Minus, CheckCircle2 
+    CreditCard, Settings, LogOut, Search, ChevronRight, Plus, Minus, CheckCircle2,
+    Activity, Bell
 } from 'lucide-react';
 
 const ProductsPage = () => {
     const navigate = useNavigate();
     const location = useLocation();
+    
+    // User & Cart States
     const [userData, setUserData] = useState(null);
     const [quantities, setQuantities] = useState({});
     const [products, setProducts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
-    // State to track what has been bought already this month
     const [usedQuota, setUsedQuota] = useState({});
+    
+    // Live Stock State - Initializes at 0
+    const [stock, setStock] = useState(0);
 
     const BACKEND_URL = "http://localhost:5000";
 
     useEffect(() => {
+        // Bootstrap CSS Injection
         const link = document.createElement('link');
         link.rel = 'stylesheet';
         link.href = 'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css';
         document.head.appendChild(link);
 
+        // User Auth Check
         const storedUser = localStorage.getItem("userDetails");
         let currentUser = null;
         if (storedUser) {
@@ -41,37 +48,30 @@ const ProductsPage = () => {
                 const prodRes = await axios.get(`${BACKEND_URL}/api/products`);
                 setProducts(prodRes.data);
 
-                // --- CRITICAL FIX 1: Safely get the user ID ---
                 const actualUserId = currentUser?._id || currentUser?.id;
                 
                 if (!actualUserId) {
                     console.error("User ID is missing!");
                     setLoading(false);
-                    return; // Stop the code here so it doesn't crash the server
+                    return; 
                 }
 
-                // 2. Fetch User Orders (ADDED CACHE BUSTER `&t=${Date.now()}` to force fresh data)
+                // 2. Fetch User Orders
                 const orderRes = await axios.get(`${BACKEND_URL}/api/orders/my?userId=${actualUserId}&t=${Date.now()}`);
                 
                 const usageMap = {};
-                
-                // Handle different backend response structures safely
                 const ordersList = orderRes.data.data || orderRes.data;
 
                 if (ordersList && Array.isArray(ordersList)) {
-                    // Get current month and year to ensure quota resets every month
                     const now = new Date();
                     const currentMonth = now.getMonth();
                     const currentYear = now.getFullYear();
 
                     ordersList.forEach(order => {
                         const orderDate = new Date(order.createdAt);
-                        // Only count orders placed in the current month
                         if (orderDate.getMonth() === currentMonth && orderDate.getFullYear() === currentYear) {
                             order.items.forEach(item => {
-                                // CRITICAL FIX 2: Force the ID to be a String so matching works perfectly
                                 const prodId = String(item.product._id || item.product);
-                                // CRITICAL FIX 3: Ensure quantity is treated as a Number
                                 usageMap[prodId] = (usageMap[prodId] || 0) + Number(item.quantity || 0);
                             });
                         }
@@ -85,21 +85,41 @@ const ProductsPage = () => {
             }
         };
         fetchData();
+
+        // 3. Fetch Live Shop Stock & Setup Polling
+        const fetchStock = async () => {
+            try {
+                const res = await axios.get(`${BACKEND_URL}/api/stock`);
+                // Safely check if stock exists in response, otherwise fallback to 0
+                setStock(res.data?.stock != null ? res.data.stock : 0);
+            } catch (err) {
+                console.error("Stock fetch error, defaulting to 0:", err);
+                // 🔴 FORCE to 0 if the backend fails entirely
+                setStock(0); 
+            }
+        };
+        
+        fetchStock();
+        const stockInterval = setInterval(fetchStock, 5000);
+
+        return () => {
+            clearInterval(stockInterval);
+            if (document.head.contains(link)) {
+                document.head.removeChild(link);
+            }
+        };
     }, [navigate]);
 
     // --- Logic for Monthly Limit Constraint ---
     const handleQty = (product, delta) => {
         const currentQty = quantities[product._id] || 0;
-        // Use String() to safely look up the ID in our map
         const alreadyBought = usedQuota[String(product._id)] || 0;
         const remainingQuota = product.monthlyLimit - alreadyBought;
         
         const newQty = currentQty + delta;
 
-        // 1. Prevent negative quantities
         if (newQty < 0) return;
 
-        // 2. Check against Remaining Quota (Limit - Already Bought)
         if (newQty > remainingQuota) {
             alert(`Limit Exceeded! You already bought ${alreadyBought}${product.unit}. Remaining quota: ${remainingQuota}${product.unit}.`);
             return;
@@ -111,7 +131,7 @@ const ProductsPage = () => {
         }));
     };
 
-    // --- NEW: Handle Direct Input Typing ---
+    // --- Handle Direct Input Typing ---
     const handleInputChange = (product, value) => {
         const alreadyBought = usedQuota[String(product._id)] || 0;
         const remainingQuota = product.monthlyLimit - alreadyBought;
@@ -120,7 +140,6 @@ const ProductsPage = () => {
         if (isNaN(newQty)) newQty = 0;
         if (newQty < 0) newQty = 0;
 
-        // Auto-correct to maximum available if they type a number too high
         if (newQty > remainingQuota) {
             alert(`Limit Exceeded! You can only add up to ${remainingQuota}${product.unit} more.`);
             newQty = remainingQuota; 
@@ -147,7 +166,6 @@ const ProductsPage = () => {
             return;
         }
 
-        // Pass selected data to Payment Page
         navigate('/payment', { state: { cart: selectedItems } });
     };
 
@@ -172,6 +190,55 @@ const ProductsPage = () => {
                 .nav-link-custom.active { background-color: #2563eb; color: white; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2); }
                 .main-content { flex-grow: 1; height: 100vh; overflow-y: auto; background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); }
                 
+                /* LIVE STOCK CSS */
+                .stock-dashboard {
+                    background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+                    color: white;
+                    border-radius: 20px;
+                    padding: 25px 30px;
+                    margin-bottom: 20px;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+                }
+                .stock-info h3 { margin: 0; font-size: 1.4rem; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+                .stock-info p { margin: 5px 0 0 0; color: #bfdbfe; font-size: 0.95rem; }
+                .stock-amount { font-size: 2.5rem; font-weight: 700; line-height: 1; }
+                .stock-amount span { font-size: 1.2rem; font-weight: 500; }
+                .status-badge {
+                    background: rgba(255, 255, 255, 0.2);
+                    padding: 6px 14px;
+                    border-radius: 20px;
+                    font-size: 0.85rem;
+                    margin-top: 12px;
+                    display: inline-block;
+                    font-weight: 500;
+                }
+
+                /* SCROLLING TICKER CSS */
+                .marquee-container {
+                    background: white;
+                    border-radius: 15px;
+                    overflow: hidden;
+                    white-space: nowrap;
+                    padding: 15px 0;
+                    margin-bottom: 30px;
+                    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+                }
+                .marquee-content {
+                    display: inline-block;
+                    animation: marquee 20s linear infinite;
+                    color: #2563eb;
+                    font-weight: 600;
+                    padding-left: 100%;
+                }
+                @keyframes marquee {
+                    0% { transform: translateX(0) }
+                    100% { transform: translateX(-100%) }
+                }
+
+                /* PRODUCT CARD CSS */
                 .product-card {
                     background: rgba(255, 255, 255, 0.7);
                     backdrop-filter: blur(10px);
@@ -182,14 +249,8 @@ const ProductsPage = () => {
                     height: 100%;
                     position: relative;
                 }
-                .product-card.selected {
-                    border-color: #2563eb;
-                    background: rgba(37, 99, 235, 0.05);
-                    transform: scale(1.02);
-                }
-                .selection-overlay {
-                    position: absolute; top: 10px; right: 10px; color: #2563eb; z-index: 10;
-                }
+                .product-card.selected { border-color: #2563eb; background: rgba(37, 99, 235, 0.05); transform: scale(1.02); }
+                .selection-overlay { position: absolute; top: 10px; right: 10px; color: #2563eb; z-index: 10; }
                 .img-wrapper { width: 100%; height: 140px; overflow: hidden; }
                 .product-img { width: 100%; height: 100%; object-fit: cover; }
                 
@@ -236,24 +297,69 @@ const ProductsPage = () => {
 
             {/* Main Content */}
             <main className="main-content p-5">
-                <header className="d-flex justify-content-between align-items-center mb-5">
+                
+                {/* 🟢 LIVE STOCK DASHBOARD */}
+                <div className="stock-dashboard shadow-sm">
+                    <div className="stock-info">
+                        <h3><Activity size={24} /> Live Shop Stock</h3>
+                        <p>Real-time rice availability at your designated ration shop</p>
+                        <div className="status-badge">
+                            {stock > 0 ? '🟢 Distribution Active' : '🔴 Currently Unavailable'}
+                        </div>
+                    </div>
+                    <div className="text-end">
+                        <div className="stock-amount">
+                            {/* Force display of 0 if stock is somehow empty */}
+                            {stock != null ? stock : 0} <span>KG</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* 🚨 SCROLLING TICKER */}
+                <div className="marquee-container">
+                    <div className="marquee-content">
+                        <Bell size={18} />  
+                        &nbsp; 🚨 STOCK ALERT :
+                        {stock > 0 ? (
+                            <>
+                                Rice Available: <strong>{stock} KG</strong> |
+                                Distribution Active |
+                                Visit your ration shop
+                            </>
+                        ) : (
+                            <>
+                                ❌ Out of Stock |
+                                Please wait for update
+                            </>
+                        )}
+                    </div>
+                </div>
+
+                {/* Header & Search */}
+                <header className="d-flex justify-content-between align-items-center mb-4">
                     <div>
                         <h2 className="fw-bold text-dark mb-1">Select Items</h2>
                         <p className="text-secondary small">Your monthly quota is managed automatically.</p>
                     </div>
                     <div className="bg-white px-3 py-2 rounded-pill shadow-sm border d-flex align-items-center gap-2">
                         <Search size={18} className="text-secondary" />
-                        <input type="text" placeholder="Search..." className="border-0 bg-transparent outline-none" onChange={(e) => setSearchTerm(e.target.value)} />
+                        <input 
+                            type="text" 
+                            placeholder="Search products..." 
+                            className="border-0 bg-transparent outline-none" 
+                            style={{ outline: 'none' }}
+                            onChange={(e) => setSearchTerm(e.target.value)} 
+                        />
                     </div>
                 </header>
 
+                {/* Products Grid */}
                 {loading ? (
                     <div className="text-center p-5"><div className="spinner-border text-primary"></div></div>
                 ) : (
                     <div className="row g-4">
                         {filteredProducts.map((product) => {
                             const isSelected = quantities[product._id] > 0;
-                            // Match string ID here just to be perfectly safe
                             const alreadyBought = usedQuota[String(product._id)] || 0;
                             const remaining = product.monthlyLimit - alreadyBought;
 
@@ -262,8 +368,12 @@ const ProductsPage = () => {
                                     <div className={`product-card shadow-sm ${isSelected ? 'selected' : ''}`}>
                                         {isSelected && <CheckCircle2 className="selection-overlay" size={24} />}
                                         
-                                        <div className="img-wrapper">
-                                            <img src={product.image} alt={product.name} className="product-img" />
+                                        <div className="img-wrapper bg-light d-flex align-items-center justify-content-center">
+                                            {product.image ? (
+                                                <img src={product.image} alt={product.name} className="product-img" />
+                                            ) : (
+                                                <ShoppingBag size={48} className="text-muted opacity-50" />
+                                            )}
                                         </div>
 
                                         <div className="p-3">
@@ -318,7 +428,7 @@ const ProductsPage = () => {
                     </div>
                 )}
 
-                <div className="d-flex justify-content-end mt-5">
+                <div className="d-flex justify-content-end mt-5 pb-5">
                     <button className="btn-proceed shadow d-flex align-items-center" onClick={handleProceed}>
                         Proceed to Payment <ChevronRight size={20} className="ms-2"/>
                     </button>
