@@ -4,7 +4,7 @@ import axios from 'axios';
 import { 
     User, ShoppingBag, Store, Calendar, 
     CreditCard, Settings, LogOut, Search, ChevronRight, Plus, Minus, CheckCircle2,
-    Activity, Bell
+    Activity, Bell, RefreshCw
 } from 'lucide-react';
 
 const ProductsPage = () => {
@@ -19,10 +19,52 @@ const ProductsPage = () => {
     const [searchTerm, setSearchTerm] = useState("");
     const [usedQuota, setUsedQuota] = useState({});
     
-    // Live Stock State - Initializes at 0
+    // Live Stock State
     const [stock, setStock] = useState(0);
+    const [isCheckingStock, setIsCheckingStock] = useState(false);
 
     const BACKEND_URL = "http://localhost:5000";
+
+    // --- 🚨 UPDATED: Deep Debugging Function to manually check stock ---
+    const handleCheckStock = async () => {
+        setIsCheckingStock(true);
+        console.log("➡️ Requesting stock update from:", `${BACKEND_URL}/api/stock`);
+        
+        try {
+            const res = await axios.get(`${BACKEND_URL}/api/stock`);
+            
+            // 🐛 DEBUG 1: Print the exact response payload from the server!
+            console.log("✅ SUCCESS! Server Response Data:", res.data);
+
+            if (res.data && res.data.stock != null) {
+                console.log("📦 Found stock value:", res.data.stock);
+                setStock(res.data.stock);
+            } else {
+                console.warn("⚠️ Server responded, but 'stock' field is missing or null! Setting to 0.");
+                setStock(0);
+            }
+        } catch (err) {
+            // 🐛 DEBUG 2: Print the exact error if it fails!
+            console.error("❌ ERROR: Stock fetch failed!");
+            
+            if (err.response) {
+                // The server responded with a status code outside the 2xx range (e.g., 404, 500)
+                console.error("Status Code:", err.response.status);
+                console.error("Error Data from Server:", err.response.data);
+            } else if (err.request) {
+                // The request was made but no response was received (e.g., backend is offline, CORS error)
+                console.error("Network Error: No response received. Is the backend running on port 5000? Check for CORS errors.");
+            } else {
+                // Something happened setting up the request
+                console.error("Request Setup Error:", err.message);
+            }
+            
+            setStock(0); 
+        } finally {
+            setIsCheckingStock(false);
+            console.log("--- End of Stock Check ---");
+        }
+    };
 
     useEffect(() => {
         // Bootstrap CSS Injection
@@ -80,27 +122,15 @@ const ProductsPage = () => {
                 setUsedQuota(usageMap);
                 setLoading(false);
             } catch (err) {
-                console.error("Failed to load data:", err);
+                console.error("Failed to load user data/products:", err);
                 setLoading(false);
             }
         };
         fetchData();
 
-        // 3. Fetch Live Shop Stock & Setup Polling
-        const fetchStock = async () => {
-            try {
-                const res = await axios.get(`${BACKEND_URL}/api/stock`);
-                // Safely check if stock exists in response, otherwise fallback to 0
-                setStock(res.data?.stock != null ? res.data.stock : 0);
-            } catch (err) {
-                console.error("Stock fetch error, defaulting to 0:", err);
-                // 🔴 FORCE to 0 if the backend fails entirely
-                setStock(0); 
-            }
-        };
-        
-        fetchStock();
-        const stockInterval = setInterval(fetchStock, 5000);
+        // 3. Fetch Initial Live Shop Stock & Setup Polling
+        handleCheckStock(); // Load initial stock
+        const stockInterval = setInterval(handleCheckStock, 5000); // Keep polling every 5 seconds
 
         return () => {
             clearInterval(stockInterval);
@@ -238,6 +268,14 @@ const ProductsPage = () => {
                     100% { transform: translateX(-100%) }
                 }
 
+                /* ICON SPIN ANIMATION */
+                @keyframes spin {
+                    100% { transform: rotate(360deg); }
+                }
+                .spin-icon {
+                    animation: spin 1s linear infinite;
+                }
+
                 /* PRODUCT CARD CSS */
                 .product-card {
                     background: rgba(255, 255, 255, 0.7);
@@ -307,11 +345,21 @@ const ProductsPage = () => {
                             {stock > 0 ? '🟢 Distribution Active' : '🔴 Currently Unavailable'}
                         </div>
                     </div>
-                    <div className="text-end">
+                    <div className="text-end d-flex flex-column align-items-end">
                         <div className="stock-amount">
-                            {/* Force display of 0 if stock is somehow empty */}
                             {stock != null ? stock : 0} <span>KG</span>
                         </div>
+                        
+                        {/* 🔘 "CHECK NOW" BUTTON */}
+                        <button 
+                            onClick={handleCheckStock}
+                            disabled={isCheckingStock}
+                            className="btn btn-light btn-sm mt-2 fw-bold d-flex align-items-center gap-2"
+                            style={{ borderRadius: '10px', color: '#1e3a8a', padding: '6px 12px' }}
+                        >
+                            <RefreshCw size={14} className={isCheckingStock ? "spin-icon" : ""} />
+                            {isCheckingStock ? "Checking..." : "Check Now"}
+                        </button>
                     </div>
                 </div>
 
